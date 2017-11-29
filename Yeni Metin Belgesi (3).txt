@@ -1,0 +1,161 @@
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266WiFiMulti.h>
+#include <ESP8266HTTPClient.h>
+#include <Wire.h>
+#include <MFRC522.h>
+#include <SPI.h>
+#define RST_PIN 20 // RST-PIN for RC522 - RFID - SPI - Module GPIO15 
+#define SS_PIN  2  // SDA-PIN for RC522 - RFID - SPI - Module GPIO2
+MFRC522 myCard(SS_PIN, RST_PIN);   // Create MFRC522 instance
+/*
+*************************************************************************************************
+pin baglantilari
+NODEMCU/////////RFID/////////BUZZER/////////SD CARD/////////DS13
+D0                                                  
+D1                                              
+D4 (TXD1)       SDA                        (EKLENECEK)            
+D5 (HSCLK)      SCK                        SCK   
+D6 (HMISO)      MISO                       MISO                                       
+D7 (HMOSI)      MOSI                       MOSI      
+D8 -----------------------VCC                           
+RX -----------------------GND                                                   
+GND             GND                         GND                       
+3V3             3V3                         VCC              
+VCC
+************************************************************************************************
+*/
+#define USE_SERIAL Serial
+ESP8266WiFiMulti WiFiMulti;
+
+String onceki="";
+String sonraki="";
+
+void setup() {
+    USE_SERIAL.begin(115200);
+    USE_SERIAL.println("BASLIYORING");
+    
+    WiFiMulti.addAP("BeskopruUnifi", "00000000");
+
+    //************************************************
+    SPI.begin();           // Init SPI bus
+    myCard.PCD_Init();    // Init MFRC522
+    //************************************************
+   pinMode(15,OUTPUT);//D8
+  pinMode(3,OUTPUT);//RX
+
+}
+
+void loop() {
+  //************************************RFID OKUMA********************************************************
+  if ( ! myCard.PICC_IsNewCardPresent()) //Eðer yeni bir kart okutulmadýysa baþa dön
+  {
+    delay(100);
+    return;
+  }
+  
+  if ( ! myCard.PICC_ReadCardSerial()) // Birden çok kart ayný anda yaklaþtýrýlmýþsa birini seç(hatayý engeller)    
+      return;
+  //MFRC522::PICC_Type piccType = myCard.PICC_GetType(myCard.uid.sak);
+  
+  String content= "";
+  for (byte i = 0; i < myCard.uid.size; i++) 
+  {
+    
+     content.concat(String(myCard.uid.uidByte[i], HEX));
+  }
+  content.toUpperCase();
+ 
+  myCard.PICC_HaltA(); //Kartla ilgili iþlemleri
+  Serial.println("Cart read:" + content);
+  sonraki = content;
+  //************************************************************************************************
+  
+  if(onceki !=sonraki)//Ayný kiþi ard arda kart basmamasý için.arada bir kiþi daha basmalý karþýlaþtýrýyor.
+  {
+  //-------------------------------------------
+    if((WiFiMulti.run() == WL_CONNECTED))
+     {
+      digitalWrite(3,0);
+                 
+        HTTPClient http;
+        USE_SERIAL.println("wifi fonka girdi.");
+        //boþluklarý sildik
+        content.replace(" ", "");
+        //get isteði yapilan adres lokal aðda bilgisayarýnýzýn ip adresini yazýn
+        String url;
+        url = String("http://ardom.merakla.com/arduyaz.php?deger="+content);
+        //http://ardom.merakla.com/arduoku.php?oku
+        http.begin(url); //HTTP
+        int httpCode = http.GET();
+        if(httpCode > 0)
+         {
+            USE_SERIAL.println("http>0 a girdi");
+            if(httpCode == HTTP_CODE_OK) 
+            {
+                String payload = http.getString();
+              //Basarili sekilde gonderilir ise Serial ekrana ok+content yazaktýr
+                USE_SERIAL.println("payloadi okudu");
+                http.end();
+                if(payload == "ok")
+                { 
+                   //-----BUZZER-------
+                   digitalWrite(15,1);
+                   delay(75);
+                   digitalWrite(15,0);
+                   delay(75);
+                   digitalWrite(15,1);
+                   delay(75);
+                   digitalWrite(15,0);
+                   onceki = sonraki;
+                  USE_SERIAL.println(payload);
+                  USE_SERIAL.println(content);
+                 
+              }
+
+              else
+              {
+                USE_SERIAL.println("payload okuma elsesi");
+                  //-----BUZZER-------
+                  digitalWrite(15,1);
+                  delay(2000);
+                  digitalWrite(15,0);
+                 
+              }
+
+            }
+
+        }
+        
+         else
+          {
+              USE_SERIAL.println("http>0 a giremedi");
+                 digitalWrite(15,1);
+                 delay(2000);
+                 digitalWrite(15,0);
+                 delay(500);
+                 digitalWrite(15,1);
+                 delay(800);
+                 digitalWrite(15,0);
+                 
+        }
+        
+    }
+    else
+    {
+      USE_SERIAL.println("wifimultirun a giremedi");
+        //-----BUZZER-------
+                  digitalWrite(15,1);
+                  delay(1250);
+                  digitalWrite(15,0);
+                  delay(500);
+                  digitalWrite(15,1);
+                  delay(1250);
+                  digitalWrite(15,0);
+                  
+
+    }
+  
+  }   
+}
+
